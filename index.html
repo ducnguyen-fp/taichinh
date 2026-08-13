@@ -1046,6 +1046,9 @@
   const API = 'https://script.google.com/macros/s/AKfycbxIzdwcILnXGgA6glSVCYD-P8En-Vn_Ee32hv4OU0OwOQ-SHebnU-pgej6_ghPuixOZhg/exec';
   const LABELS = ['','Chưa hài lòng','Tạm được','Hài lòng','Rất hài lòng','Xuất sắc!'];
   let selectedStar = 0;
+  let currentCounts = {1:0,2:0,3:0,4:0,5:0};
+  let currentTotal = 0;
+  let currentTestimonials = [];
 
   function setStar(n) {
     selectedStar = n;
@@ -1071,9 +1074,47 @@
     let h = '';
     for (let i = 1; i <= 5; i++) {
       const f = i <= Math.round(score);
-      h += `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${f ? 'var(--gold)' : 'none'}" stroke="var(--gold)" stroke-width="1.5"><polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/></svg>`;
+      h += `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${f?'var(--gold)':'none'}" stroke="var(--gold)" stroke-width="1.5"><polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/></svg>`;
     }
     return h;
+  }
+
+  function renderStats(counts, total, avg) {
+    if (total <= 0) return;
+    document.getElementById('emptyState').style.display = 'none';
+    document.getElementById('scoreBox').style.display = 'flex';
+    document.getElementById('avgScore').textContent = Number(avg).toFixed(1);
+    document.getElementById('avgStars').innerHTML = starsSVG(avg, 18);
+    document.getElementById('voteCount').textContent = total + ' lượt đánh giá';
+    let bars = '';
+    for (let s = 5; s >= 1; s--) {
+      const c = counts[s] || 0;
+      const pct = total ? (c / total * 100).toFixed(1) : 0;
+      bars += `<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.35rem;">
+        <span style="font-size:.72rem;color:var(--ink-muted);width:10px;text-align:right;">${s}</span>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="var(--gold)" stroke="var(--gold)" stroke-width="1.5"><polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/></svg>
+        <div style="flex:1;background:var(--cream-dark);border-radius:4px;height:6px;overflow:hidden;">
+          <div style="width:${pct}%;height:100%;background:linear-gradient(90deg,var(--gold),var(--gold-light));border-radius:4px;transition:width .6s;"></div>
+        </div>
+        <span style="font-size:.7rem;color:var(--ink-muted);width:20px;">${c}</span>
+      </div>`;
+    }
+    document.getElementById('barChart').innerHTML = bars;
+  }
+
+  function renderTestimonials(list) {
+    if (!list.length) return;
+    document.getElementById('testiSection').style.display = 'block';
+    document.getElementById('testiGrid').innerHTML = list.map(t => `
+      <div style="background:var(--white);border:1px solid var(--rule);border-radius:4px;padding:1.25rem 1.5rem;position:relative;overflow:hidden;">
+        <div style="position:absolute;top:0;left:1.5rem;right:1.5rem;height:2.5px;background:linear-gradient(90deg,var(--gold),transparent);border-radius:2px;"></div>
+        <div style="display:flex;gap:2px;margin-bottom:.75rem;">${starsSVG(t.star,13)}</div>
+        <p style="font-size:.85rem;color:var(--ink-soft);line-height:1.7;margin:0 0 .75rem;font-style:italic;">"${t.text}"</p>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:.78rem;font-weight:600;color:var(--green-deep);">${t.name}</span>
+          <span style="font-size:.7rem;color:var(--ink-muted);">${t.date}</span>
+        </div>
+      </div>`).join('');
   }
 
   async function loadStats() {
@@ -1081,25 +1122,9 @@
       const r = await fetch(API + '?action=getStats');
       const d = await r.json();
       if (d.total > 0) {
-        document.getElementById('emptyState').style.display = 'none';
-        document.getElementById('scoreBox').style.display = 'flex';
-        document.getElementById('avgScore').textContent = d.avg.toFixed(1);
-        document.getElementById('avgStars').innerHTML = starsSVG(d.avg, 18);
-        document.getElementById('voteCount').textContent = d.total + ' lượt đánh giá';
-        let bars = '';
-        for (let s = 5; s >= 1; s--) {
-          const c = d.counts[s] || 0;
-          const pct = d.total ? (c / d.total * 100).toFixed(1) : 0;
-          bars += `<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.35rem;">
-            <span style="font-size:.72rem;color:var(--ink-muted);width:10px;text-align:right;">${s}</span>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="var(--gold)" stroke="var(--gold)" stroke-width="1.5"><polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/></svg>
-            <div style="flex:1;background:var(--cream-dark);border-radius:4px;height:6px;overflow:hidden;">
-              <div style="width:${pct}%;height:100%;background:linear-gradient(90deg,var(--gold),var(--gold-light));border-radius:4px;"></div>
-            </div>
-            <span style="font-size:.7rem;color:var(--ink-muted);width:20px;">${c}</span>
-          </div>`;
-        }
-        document.getElementById('barChart').innerHTML = bars;
+        currentCounts = d.counts;
+        currentTotal = d.total;
+        renderStats(d.counts, d.total, d.avg);
       }
     } catch(e) {}
   }
@@ -1109,17 +1134,8 @@
       const r = await fetch(API + '?action=getTestimonials');
       const data = await r.json();
       if (data.length > 0) {
-        document.getElementById('testiSection').style.display = 'block';
-        document.getElementById('testiGrid').innerHTML = data.map(t => `
-          <div style="background:var(--white);border:1px solid var(--rule);border-radius:4px;padding:1.25rem 1.5rem;position:relative;overflow:hidden;">
-            <div style="position:absolute;top:0;left:1.5rem;right:1.5rem;height:2.5px;background:linear-gradient(90deg,var(--gold),transparent);border-radius:2px;"></div>
-            <div style="display:flex;gap:2px;margin-bottom:.75rem;">${starsSVG(t.star, 13)}</div>
-            <p style="font-size:.85rem;color:var(--ink-soft);line-height:1.7;margin:0 0 .75rem;font-style:italic;">"${t.text}"</p>
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span style="font-size:.78rem;font-weight:600;color:var(--green-deep);">${t.name}</span>
-              <span style="font-size:.7rem;color:var(--ink-muted);">${t.date}</span>
-            </div>
-          </div>`).join('');
+        currentTestimonials = data;
+        renderTestimonials(data);
       }
     } catch(e) {}
   }
@@ -1133,24 +1149,36 @@
     btn.textContent = 'Đang gửi...';
     btn.disabled = true;
 
+    // Gửi lên server (no-cors để tránh lỗi CORS)
     try {
-      // Dùng GET thay POST để tránh lỗi CORS với Google Apps Script
-      const params = new URLSearchParams({
-        action: 'vote',
-        star: selectedStar,
-        name: name,
-        text: text
-      });
-      await fetch(API + '?' + params.toString(), { mode: 'no-cors' });
+      const params = new URLSearchParams({ action:'vote', star:selectedStar, name, text });
+      await fetch(API + '?' + params.toString(), { mode:'no-cors' });
+    } catch(e) {}
 
-      document.getElementById('formCard').style.display = 'none';
-      document.getElementById('successBox').style.display = 'block';
-      // Chờ 2 giây để Apps Script xử lý xong rồi mới load lại
-      setTimeout(() => { loadStats(); loadTestimonials(); }, 2000);
-    } catch(e) {
-      btn.textContent = 'Có lỗi, thử lại →';
-      btn.disabled = false;
+    // Cập nhật UI ngay lập tức, không chờ server
+    const newCounts = { ...currentCounts };
+    newCounts[selectedStar] = (newCounts[selectedStar] || 0) + 1;
+    const newTotal = currentTotal + 1;
+    const newAvg = Object.entries(newCounts).reduce((s,[k,v]) => s + Number(k)*v, 0) / newTotal;
+    currentCounts = newCounts;
+    currentTotal = newTotal;
+    renderStats(newCounts, newTotal, newAvg);
+
+    // Hiện testimonial ngay nếu có nhận xét
+    if (text) {
+      const newTesti = [
+        { name, star: selectedStar, text, date: new Date().toLocaleDateString('vi-VN') },
+        ...currentTestimonials
+      ];
+      currentTestimonials = newTesti;
+      renderTestimonials(newTesti);
     }
+
+    document.getElementById('formCard').style.display = 'none';
+    document.getElementById('successBox').style.display = 'block';
+
+    // Đồng bộ lại từ server sau 5 giây
+    setTimeout(() => { loadStats(); loadTestimonials(); }, 5000);
   }
 
   loadStats();
