@@ -978,7 +978,7 @@
     </div>
 
     <!-- Score Overview -->
-    <div id="scoreBox" style="display:none;background:var(--white);border:1px solid var(--rule);border-radius:6px;padding:1.75rem 2rem;max-width:580px;margin:0 auto 2rem;display:none;flex-wrap:wrap;gap:2rem;align-items:center;">
+    <div id="scoreBox" style="display:none;background:var(--white);border:1px solid var(--rule);border-radius:6px;padding:1.75rem 2rem;max-width:580px;margin:0 auto 2rem;gap:2rem;align-items:center;flex-wrap:wrap;">
       <div style="text-align:center;">
         <div id="avgScore" style="font-family:'Playfair Display',serif;font-size:3.75rem;font-weight:600;color:var(--green-deep);line-height:1;">0.0</div>
         <div id="avgStars" style="display:flex;gap:3px;justify-content:center;margin-top:.4rem;"></div>
@@ -1117,27 +1117,42 @@
       </div>`).join('');
   }
 
+  function formatDate(d) {
+    try {
+      const dt = new Date(d);
+      if (!isNaN(dt.getTime())) return dt.toLocaleDateString('vi-VN');
+    } catch(e) {}
+    return d;
+  }
+
   async function loadStats() {
     try {
-      const r = await fetch(API + '?action=getStats');
+      const r = await fetch(API + '?action=getStats', { credentials: 'omit', cache: 'no-cache' });
       const d = await r.json();
-      if (d.total > 0) {
+      if (d && d.total > 0) {
         currentCounts = d.counts;
         currentTotal = d.total;
         renderStats(d.counts, d.total, d.avg);
       }
-    } catch(e) {}
+    } catch(e) {
+      // Retry sau 4 giây nếu thất bại
+      setTimeout(loadStats, 4000);
+    }
   }
 
   async function loadTestimonials() {
     try {
-      const r = await fetch(API + '?action=getTestimonials');
+      const r = await fetch(API + '?action=getTestimonials', { credentials: 'omit', cache: 'no-cache' });
       const data = await r.json();
-      if (data.length > 0) {
-        currentTestimonials = data;
-        renderTestimonials(data);
+      if (Array.isArray(data) && data.length > 0) {
+        // Fix định dạng ngày trả về từ Google Sheets
+        const fixed = data.map(t => ({ ...t, date: formatDate(t.date) }));
+        currentTestimonials = fixed;
+        renderTestimonials(fixed);
       }
-    } catch(e) {}
+    } catch(e) {
+      setTimeout(loadTestimonials, 4000);
+    }
   }
 
   async function submitVote() {
