@@ -1043,7 +1043,7 @@
 </section>
 
 <script>
-  const API = 'https://script.google.com/macros/s/AKfycbxjTdZZSgPacuWqm7i-5-wGGXNNuNwJMtPD5sIzp-P_R1PWH9RwbPlYgpBWCjDYNbMrAg/exec';
+  const API = 'https://script.google.com/macros/s/AKfycbxIzdwcILnXGgA6glSVCYD-P8En-Vn_Ee32hv4OU0OwOQ-SHebnU-pgej6_ghPuixOZhg/exec';
   const LABELS = ['','Chưa hài lòng','Tạm được','Hài lòng','Rất hài lòng','Xuất sắc!'];
   let selectedStar = 0;
 
@@ -1134,14 +1134,19 @@
     btn.disabled = true;
 
     try {
-      await fetch(API, {
-        method: 'POST',
-        body: JSON.stringify({ action: 'vote', star: selectedStar, name, text }),
+      // Dùng GET thay POST để tránh lỗi CORS với Google Apps Script
+      const params = new URLSearchParams({
+        action: 'vote',
+        star: selectedStar,
+        name: name,
+        text: text
       });
+      await fetch(API + '?' + params.toString(), { mode: 'no-cors' });
+
       document.getElementById('formCard').style.display = 'none';
       document.getElementById('successBox').style.display = 'block';
-      loadStats();
-      loadTestimonials();
+      // Chờ 2 giây để Apps Script xử lý xong rồi mới load lại
+      setTimeout(() => { loadStats(); loadTestimonials(); }, 2000);
     } catch(e) {
       btn.textContent = 'Có lỗi, thử lại →';
       btn.disabled = false;
