@@ -1128,30 +1128,42 @@
   async function loadStats() {
     try {
       const r = await fetch(API + '?action=getStats', { credentials: 'omit', cache: 'no-cache' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
       const d = await r.json();
-      if (d && d.total > 0) {
+      const total = parseInt(d.total) || 0;
+      if (total > 0) {
         currentCounts = d.counts;
-        currentTotal = d.total;
-        renderStats(d.counts, d.total, d.avg);
+        currentTotal = total;
+        renderStats(d.counts, total, parseFloat(d.avg) || 0);
       }
     } catch(e) {
-      // Retry sau 4 giây nếu thất bại
-      setTimeout(loadStats, 4000);
+      setTimeout(loadStats, 5000);
     }
   }
 
   async function loadTestimonials() {
     try {
       const r = await fetch(API + '?action=getTestimonials', { credentials: 'omit', cache: 'no-cache' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
       const data = await r.json();
       if (Array.isArray(data) && data.length > 0) {
-        // Fix định dạng ngày trả về từ Google Sheets
-        const fixed = data.map(t => ({ ...t, date: formatDate(t.date) }));
+        const fixed = data.map(t => ({ ...t, star: parseInt(t.star) || 5, date: formatDate(t.date) }));
         currentTestimonials = fixed;
         renderTestimonials(fixed);
+
+        // Fallback: nếu loadStats chưa hiện được scoreBox, tính từ testimonials
+        if (currentTotal === 0) {
+          const counts = {1:0, 2:0, 3:0, 4:0, 5:0};
+          fixed.forEach(t => { if (t.star >= 1 && t.star <= 5) counts[t.star]++; });
+          const total = fixed.length;
+          const avg = fixed.reduce((s, t) => s + t.star, 0) / total;
+          currentCounts = counts;
+          currentTotal = total;
+          renderStats(counts, total, Math.round(avg * 10) / 10);
+        }
       }
     } catch(e) {
-      setTimeout(loadTestimonials, 4000);
+      setTimeout(loadTestimonials, 5000);
     }
   }
 
