@@ -1059,6 +1059,47 @@
   let currentTotal = 0;
   let currentTestimonials = [];
 
+  // ---- LỚP CHỐNG LỖI: cache local + retry + hàng đợi gửi lại ----
+  // Nguyên nhân review "lúc hiện lúc không": request tới Google Apps Script
+  // có thể thất bại âm thầm (CORS chập chờn, hết quota, script chưa authorize
+  // lại sau khi deploy...). Trước đây lỗi bị nuốt (no-cors + catch rỗng) nên
+  // không ai biết. Đoạn dưới đây: (1) không còn dùng no-cors nên có thể phát
+  // hiện thất bại thật, (2) tự retry với backoff thay vì thử 1 lần rồi bỏ,
+  // (3) cache kết quả tốt gần nhất vào localStorage để trang không bao giờ
+  // hiển thị "trống" chỉ vì 1 lần gọi mạng thất bại, (4) nếu gửi đánh giá
+  // thất bại thì lưu vào hàng đợi và tự gửi lại ở lần tải trang sau, không
+  // để mất review của khách.
+  const LS_STATS = 'fidt_review_stats_v1';
+  const LS_TESTI = 'fidt_review_testi_v1';
+  const LS_PENDING = 'fidt_review_pending_v1';
+
+  function lsGet(key, fallback) {
+    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+    catch(e) { return fallback; }
+  }
+  function lsSet(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch(e) {}
+  }
+
+  async function fetchWithRetry(url, options, maxRetries) {
+    let lastErr;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const bust = url.includes('?') ? '&_=' : '?_=';
+        const r = await fetch(url + bust + Date.now(), options);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return await r.json();
+      } catch (e) {
+        lastErr = e;
+        console.warn('[Đánh giá] Lần thử ' + (attempt + 1) + ' thất bại:', e.message || e);
+        if (attempt < maxRetries) {
+          await new Promise(res => setTimeout(res, Math.min(1000 * Math.pow(2, attempt), 8000)));
+        }
+      }
+    }
+    throw lastErr;
+  }
+
   function setStar(n) {
     selectedStar = n;
     for (let i = 1; i <= 5; i++) {
@@ -1168,29 +1209,29 @@
 
   async function loadStats() {
     try {
-      const r = await fetch(API + '?action=getStats', { credentials: 'omit', cache: 'no-cache' });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      const d = await r.json();
+      const d = await fetchWithRetry(API + '?action=getStats', { credentials: 'omit', cache: 'no-store' }, 4);
       const total = parseInt(d.total) || 0;
       if (total > 0) {
         currentCounts = d.counts;
         currentTotal = total;
         renderStats(d.counts, total, parseFloat(d.avg) || 0);
+        lsSet(LS_STATS, { counts: d.counts, total, avg: parseFloat(d.avg) || 0 });
       }
     } catch(e) {
-      setTimeout(loadStats, 5000);
+      console.warn('[Đánh giá] Không tải được thống kê sau nhiều lần thử, dùng dữ liệu đã lưu tạm nếu có.', e);
+      // Vẫn thử lại nền, không làm phiền người dùng, không bỏ cuộc vĩnh viễn
+      setTimeout(loadStats, 60000);
     }
   }
 
   async function loadTestimonials() {
     try {
-      const r = await fetch(API + '?action=getTestimonials', { credentials: 'omit', cache: 'no-cache' });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      const data = await r.json();
+      const data = await fetchWithRetry(API + '?action=getTestimonials', { credentials: 'omit', cache: 'no-store' }, 4);
       if (Array.isArray(data) && data.length > 0) {
         const fixed = data.map(t => ({ ...t, star: parseInt(t.star) || 5, date: formatDate(t.date) }));
         currentTestimonials = fixed;
         renderTestimonials(fixed);
+        lsSet(LS_TESTI, fixed);
 
         // Fallback: nếu loadStats chưa hiện được scoreBox, tính từ testimonials
         if (currentTotal === 0) {
@@ -1201,10 +1242,57 @@
           currentCounts = counts;
           currentTotal = total;
           renderStats(counts, total, Math.round(avg * 10) / 10);
+          lsSet(LS_STATS, { counts, total, avg: Math.round(avg * 10) / 10 });
         }
       }
     } catch(e) {
-      setTimeout(loadTestimonials, 5000);
+      console.warn('[Đánh giá] Không tải được testimonials sau nhiều lần thử, dùng dữ liệu đã lưu tạm nếu có.', e);
+      setTimeout(loadTestimonials, 60000);
+    }
+  }
+
+  // Hiển thị ngay dữ liệu đã lưu tạm từ lần tải trang trước, để trang
+  // không bao giờ trông "trống" chỉ vì 1 lần gọi mạng bị lỗi.
+  function renderFromCache() {
+    const cachedStats = lsGet(LS_STATS, null);
+    if (cachedStats && cachedStats.total > 0) {
+      currentCounts = cachedStats.counts;
+      currentTotal = cachedStats.total;
+      renderStats(cachedStats.counts, cachedStats.total, cachedStats.avg);
+    }
+    const cachedTesti = lsGet(LS_TESTI, null);
+    if (cachedTesti && cachedTesti.length > 0) {
+      currentTestimonials = cachedTesti;
+      renderTestimonials(cachedTesti);
+    }
+  }
+
+  // Gửi 1 đánh giá thật sự lên server, trả về true/false (không nuốt lỗi).
+  async function sendVoteToServer(vote) {
+    try {
+      const params = new URLSearchParams({ action:'vote', star:vote.star, name:vote.name, text:vote.text });
+      await fetchWithRetry(API + '?' + params.toString(), { credentials: 'omit' }, 3);
+      return true;
+    } catch (e) {
+      console.warn('[Đánh giá] Gửi lên server thất bại, sẽ tự gửi lại sau:', e);
+      return false;
+    }
+  }
+
+  // Xử lý các đánh giá đã lưu tạm (gửi trước đó bị lỗi) mỗi khi tải trang.
+  async function flushPendingVotes() {
+    const pending = lsGet(LS_PENDING, []);
+    if (!pending.length) return;
+    const stillPending = [];
+    for (const vote of pending) {
+      const ok = await sendVoteToServer(vote);
+      if (!ok) stillPending.push(vote);
+    }
+    lsSet(LS_PENDING, stillPending);
+    if (stillPending.length < pending.length) {
+      // Có review gửi thành công muộn -> đồng bộ lại dữ liệu hiển thị
+      loadStats();
+      loadTestimonials();
     }
   }
 
@@ -1217,13 +1305,18 @@
     btn.textContent = 'Đang gửi...';
     btn.disabled = true;
 
-    // Gửi lên server (no-cors để tránh lỗi CORS)
-    try {
-      const params = new URLSearchParams({ action:'vote', star:selectedStar, name, text });
-      await fetch(API + '?' + params.toString(), { mode:'no-cors' });
-    } catch(e) {}
+    const vote = { star: selectedStar, name, text, date: new Date().toLocaleDateString('vi-VN') };
+    const ok = await sendVoteToServer(vote);
 
-    // Cập nhật UI ngay lập tức, không chờ server
+    if (!ok) {
+      // Không gửi được ngay -> lưu vào hàng đợi, sẽ tự gửi lại lần sau
+      // (khi mở lại trang, hoặc khi mạng ổn định). Không để mất review.
+      const pending = lsGet(LS_PENDING, []);
+      pending.push({ star: vote.star, name: vote.name, text: vote.text });
+      lsSet(LS_PENDING, pending);
+    }
+
+    // Cập nhật UI ngay lập tức để khách thấy phản hồi tức thì
     const newCounts = { ...currentCounts };
     newCounts[selectedStar] = (newCounts[selectedStar] || 0) + 1;
     const newTotal = currentTotal + 1;
@@ -1231,24 +1324,31 @@
     currentCounts = newCounts;
     currentTotal = newTotal;
     renderStats(newCounts, newTotal, newAvg);
+    lsSet(LS_STATS, { counts: newCounts, total: newTotal, avg: newAvg });
 
     // Hiện testimonial ngay nếu có nhận xét
     if (text) {
-      const newTesti = [
-        { name, star: selectedStar, text, date: new Date().toLocaleDateString('vi-VN') },
-        ...currentTestimonials
-      ];
+      const newTesti = [vote, ...currentTestimonials];
       currentTestimonials = newTesti;
       renderTestimonials(newTesti);
+      lsSet(LS_TESTI, newTesti);
     }
 
     document.getElementById('formCard').style.display = 'none';
     document.getElementById('successBox').style.display = 'block';
+    if (!ok) {
+      const note = document.createElement('div');
+      note.style.cssText = 'font-size:.72rem;color:var(--ink-muted);margin-top:.5rem;';
+      note.textContent = 'Hệ thống đang bận, đánh giá của bạn sẽ được đồng bộ tự động ngay khi kết nối ổn định trở lại.';
+      document.getElementById('successBox').appendChild(note);
+    }
 
-    // Đồng bộ lại từ server sau 5 giây
+    // Đồng bộ lại từ server sau ít giây (không chặn UI)
     setTimeout(() => { loadStats(); loadTestimonials(); }, 5000);
   }
 
+  renderFromCache();
+  flushPendingVotes();
   loadStats();
   loadTestimonials();
 </script>
