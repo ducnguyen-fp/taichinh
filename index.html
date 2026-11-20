@@ -65,6 +65,16 @@
   }
   .nav-cta:hover { background: var(--green-mid); }
 
+  .nav-right { display:flex; align-items:center; gap:.7rem; }
+  .nav-tool {
+    font-size:.82rem; font-weight:500; letter-spacing:.05em;
+    color:var(--green-deep); border:1px solid var(--green-deep);
+    padding:.5rem 1.2rem; border-radius:2px; text-decoration:none;
+    transition:background .2s,color .2s;
+  }
+  .nav-tool:hover { background:var(--green-deep); color:var(--white); }
+  @media (max-width:560px){ .nav-tool,.nav-cta{ padding:.45rem .75rem; font-size:.72rem; letter-spacing:.02em; } .nav-tool .hide-s{ display:none; } }
+
   /* ── HERO ── */
   .hero {
     min-height: 100vh;
@@ -496,7 +506,10 @@
     <li><a href="#services">Dịch vụ</a></li>
     <li><a href="#contact">Liên hệ</a></li>
   </ul>
-  <a class="nav-cta" href="#pricing">Đặt lịch tư vấn</a>
+  <div class="nav-right">
+    <a class="nav-tool" href="hoach-dinh.html" title="Cần đăng nhập">Công cụ<span class="hide-s"> hoạch định</span></a>
+    <a class="nav-cta" href="#pricing">Đặt lịch tư vấn</a>
+  </div>
 </nav>
 
 <!-- HERO -->
